@@ -14,6 +14,8 @@ import os
 import platform
 import shutil
 import sys
+import subprocess
+import re
 
 import make_utils
 from make_utils import call, check_output
@@ -44,7 +46,10 @@ def get_blender_git_root():
     return check_output([args.git_command, "rev-parse", "--show-toplevel"])
 
 # Setup for precompiled libraries and tests from svn.
-
+def check_dawin_hw_output():
+    hardware = subprocess.check_output(["sysctl","-n","machdep.cpu.brand_string"])
+    # check if its M* Hardware
+    return re.search("M[0-9]",hardware.decode("utf-8"))
 
 def svn_update(args, release_version):
     svn_non_interactive = [args.svn_command, '--non-interactive']
@@ -54,12 +59,11 @@ def svn_update(args, release_version):
 
     # Checkout precompiled libraries
     if sys.platform == 'darwin':
-        if platform.machine() == 'x86_64':
-            lib_platform = "darwin"
-        elif platform.machine() == 'arm64':
+        if check_dawin_hw_output():
             lib_platform = "darwin_arm64"
         else:
-            lib_platform = None
+            lib_platform = "darwin"
+            
     elif sys.platform == 'win32':
         # Windows checkout is usually handled by bat scripts since python3 to run
         # this script is bundled as part of the precompiled libraries. However it
