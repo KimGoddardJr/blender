@@ -63,9 +63,9 @@ def svn_update(args, release_version):
     # Checkout precompiled libraries
     if sys.platform == 'darwin':
         if check_darwin_hw_output():
-            lib_platform = "darwin"
-        else:
             lib_platform = "darwin_arm64"
+        else:
+            lib_platform = "darwin"
             
     elif sys.platform == 'win32':
         # Windows checkout is usually handled by bat scripts since python3 to run
