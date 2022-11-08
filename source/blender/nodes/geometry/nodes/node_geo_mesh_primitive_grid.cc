@@ -18,7 +18,7 @@ namespace blender::nodes {
 static void calculate_uvs(
     Mesh *mesh, Span<MVert> verts, Span<MLoop> loops, const float size_x, const float size_y)
 {
-  MutableAttributeAccessor attributes = bke::mesh_attributes_for_write(*mesh);
+  MutableAttributeAccessor attributes = mesh->attributes_for_write();
 
   SpanAttributeWriter<float2> uv_attribute = attributes.lookup_or_add_for_write_only_span<float2>(
       "uv_map", ATTR_DOMAIN_CORNER);
@@ -49,10 +49,10 @@ Mesh *create_grid_mesh(const int verts_x,
                                    0,
                                    edges_x * edges_y * 4,
                                    edges_x * edges_y);
-  MutableSpan<MVert> verts{mesh->mvert, mesh->totvert};
-  MutableSpan<MLoop> loops{mesh->mloop, mesh->totloop};
-  MutableSpan<MEdge> edges{mesh->medge, mesh->totedge};
-  MutableSpan<MPoly> polys{mesh->mpoly, mesh->totpoly};
+  MutableSpan<MVert> verts = mesh->verts_for_write();
+  MutableSpan<MEdge> edges = mesh->edges_for_write();
+  MutableSpan<MPoly> polys = mesh->polys_for_write();
+  MutableSpan<MLoop> loops = mesh->loops_for_write();
 
   {
     const float dx = edges_x == 0 ? 0.0f : size_x / edges_x;
@@ -76,8 +76,7 @@ Mesh *create_grid_mesh(const int verts_x,
 
   const int y_edges_start = 0;
   const int x_edges_start = verts_x * edges_y;
-  const short edge_flag = (edges_x == 0 || edges_y == 0) ? ME_LOOSEEDGE :
-                                                           ME_EDGEDRAW | ME_EDGERENDER;
+  const short edge_flag = (edges_x == 0 || edges_y == 0) ? ME_LOOSEEDGE : ME_EDGEDRAW;
 
   /* Build the horizontal edges in the X direction. */
   threading::parallel_for(IndexRange(verts_x), 512, [&](IndexRange x_range) {

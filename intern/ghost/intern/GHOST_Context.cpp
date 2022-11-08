@@ -10,7 +10,7 @@
 #include "GHOST_Context.h"
 
 #ifdef _WIN32
-#  include <GL/wglew.h>  // only for symbolic constants, do not use API functions
+#  include <epoxy/wgl.h>
 #  include <tchar.h>
 #
 #  ifndef ERROR_PROFILE_DOES_NOT_MATCH_DEVICE
@@ -100,15 +100,10 @@ bool win32_chk(bool result, const char *file, int line, const char *text)
     }
 
 #  ifndef NDEBUG
-    _ftprintf(stderr,
-              "%s(%d):[%s] -> Win32 Error# (%lu): %s",
-              file,
-              line,
-              text,
-              (unsigned long)error,
-              msg);
+    _ftprintf(
+        stderr, "%s(%d):[%s] -> Win32 Error# (%lu): %s", file, line, text, ulong(error), msg);
 #  else
-    _ftprintf(stderr, "Win32 Error# (%lu): %s", (unsigned long)error, msg);
+    _ftprintf(stderr, "Win32 Error# (%lu): %s", ulong(error), msg);
 #  endif
 
     SetLastError(NO_ERROR);
@@ -122,11 +117,6 @@ bool win32_chk(bool result, const char *file, int line, const char *text)
 }
 
 #endif  // _WIN32
-
-void GHOST_Context::initContextGLEW()
-{
-  GLEW_CHK(glewInit());
-}
 
 void GHOST_Context::initClearGL()
 {

@@ -59,19 +59,10 @@ ccl_device void bsdf_transparent_setup(ccl_private ShaderData *sd,
   }
 }
 
-ccl_device Spectrum bsdf_transparent_eval_reflect(ccl_private const ShaderClosure *sc,
-                                                  const float3 I,
-                                                  const float3 omega_in,
-                                                  ccl_private float *pdf)
-{
-  *pdf = 0.0f;
-  return zero_spectrum();
-}
-
-ccl_device Spectrum bsdf_transparent_eval_transmit(ccl_private const ShaderClosure *sc,
-                                                   const float3 I,
-                                                   const float3 omega_in,
-                                                   ccl_private float *pdf)
+ccl_device Spectrum bsdf_transparent_eval(ccl_private const ShaderClosure *sc,
+                                          const float3 I,
+                                          const float3 omega_in,
+                                          ccl_private float *pdf)
 {
   *pdf = 0.0f;
   return zero_spectrum();
@@ -80,22 +71,14 @@ ccl_device Spectrum bsdf_transparent_eval_transmit(ccl_private const ShaderClosu
 ccl_device int bsdf_transparent_sample(ccl_private const ShaderClosure *sc,
                                        float3 Ng,
                                        float3 I,
-                                       float3 dIdx,
-                                       float3 dIdy,
                                        float randu,
                                        float randv,
                                        ccl_private Spectrum *eval,
                                        ccl_private float3 *omega_in,
-                                       ccl_private float3 *domega_in_dx,
-                                       ccl_private float3 *domega_in_dy,
                                        ccl_private float *pdf)
 {
   // only one direction is possible
   *omega_in = -I;
-#ifdef __RAY_DIFFERENTIALS__
-  *domega_in_dx = -dIdx;
-  *domega_in_dy = -dIdy;
-#endif
   *pdf = 1;
   *eval = one_spectrum();
   return LABEL_TRANSMIT | LABEL_TRANSPARENT;

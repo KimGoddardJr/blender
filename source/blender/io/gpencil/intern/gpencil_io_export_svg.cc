@@ -197,7 +197,7 @@ void GpencilExporterSVG::export_gpencil_layers()
         /* Apply layer thickness change. */
         gps_duplicate->thickness += gpl->line_change;
         /* Apply object scale to thickness. */
-        gps_duplicate->thickness *= mat4_to_scale(ob->obmat);
+        gps_duplicate->thickness *= mat4_to_scale(ob->object_to_world);
         CLAMP_MIN(gps_duplicate->thickness, 1.0f);
 
         const bool is_normalized = ((params_.flag & GP_EXPORT_NORM_THICKNESS) != 0) ||
@@ -217,7 +217,7 @@ void GpencilExporterSVG::export_gpencil_layers()
           }
           else {
             bGPDstroke *gps_perimeter = BKE_gpencil_stroke_perimeter_from_view(
-                rv3d_, gpd_, gpl, gps_duplicate, 3, diff_mat_.values);
+                rv3d_->viewmat, gpd_, gpl, gps_duplicate, 3, diff_mat_.values, 0.0f);
 
             /* Sample stroke. */
             if (params_.stroke_sample > 0.0f) {

@@ -4,11 +4,8 @@
 /** \file
  * \ingroup bke
  *
- * MetaBalls are created from a single Object (with a name without number in it),
- * here the DispList and BoundBox also is located.
+ * MetaBalls are created from a single Object (with a name without number in it).
  * All objects with the same name (but with a number in it) are added to this.
- *
- * texture coordinates are patched within the displist
  */
 
 #include <cctype>
@@ -25,6 +22,7 @@
 
 #include "DNA_defaults.h"
 #include "DNA_material_types.h"
+#include "DNA_mesh_types.h"
 #include "DNA_meta_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
@@ -41,11 +39,16 @@
 #include "BKE_anim_data.h"
 #include "BKE_curve.h"
 #include "BKE_displist.h"
+#include "BKE_geometry_set.hh"
 #include "BKE_idtype.h"
+#include "BKE_lattice.h"
+#include "BKE_layer.h"
 #include "BKE_lib_id.h"
 #include "BKE_lib_query.h"
 #include "BKE_material.h"
 #include "BKE_mball.h"
+#include "BKE_mball_tessellate.h"
+#include "BKE_mesh.h"
 #include "BKE_object.h"
 #include "BKE_scene.h"
 
@@ -62,10 +65,7 @@ static void metaball_init_data(ID *id)
   MEMCPY_STRUCT_AFTER(metaball, DNA_struct_default_get(MetaBall), id);
 }
 
-static void metaball_copy_data(Main *UNUSED(bmain),
-                               ID *id_dst,
-                               const ID *id_src,
-                               const int UNUSED(flag))
+static void metaball_copy_data(Main * /*bmain*/, ID *id_dst, const ID *id_src, const int /*flag*/)
 {
   MetaBall *metaball_dst = (MetaBall *)id_dst;
   const MetaBall *metaball_src = (const MetaBall *)id_src;
@@ -76,14 +76,11 @@ static void metaball_copy_data(Main *UNUSED(bmain),
 
   metaball_dst->editelems = nullptr;
   metaball_dst->lastelem = nullptr;
-  metaball_dst->batch_cache = nullptr;
 }
 
 static void metaball_free_data(ID *id)
 {
   MetaBall *metaball = (MetaBall *)id;
-
-  BKE_mball_batch_cache_free(metaball);
 
   MEM_SAFE_FREE(metaball->mat);
 
@@ -111,7 +108,6 @@ static void metaball_blend_write(BlendWriter *writer, ID *id, const void *id_add
   /* Must always be cleared (meta's don't have their own edit-data). */
   mb->needs_flush_to_id = 0;
   mb->lastelem = nullptr;
-  mb->batch_cache = nullptr;
 
   /* write LibData */
   BLO_write_id_struct(writer, MetaBall, id_address, &mb->id);
@@ -144,7 +140,6 @@ static void metaball_blend_read_data(BlendDataReader *reader, ID *id)
   mb->needs_flush_to_id = 0;
   // mb->edit_elems.first = mb->edit_elems.last = nullptr;
   mb->lastelem = nullptr;
-  mb->batch_cache = nullptr;
 }
 
 static void metaball_blend_read_lib(BlendLibReader *reader, ID *id)
@@ -183,7 +178,7 @@ IDTypeInfo IDType_ID_MB = {
     /* foreach_id */ metaball_foreach_id,
     /* foreach_cache */ nullptr,
     /* foreach_path */ nullptr,
-    /* owner_get */ nullptr,
+    /* owner_pointer_get */ nullptr,
 
     /* blend_write */ metaball_blend_write,
     /* blend_read_data */ metaball_blend_read_data,
@@ -249,99 +244,37 @@ MetaElem *BKE_mball_element_add(MetaBall *mb, const int type)
 
   return ml;
 }
-void BKE_mball_texspace_calc(Object *ob)
-{
-  DispList *dl;
-  BoundBox *bb;
-  float *data, min[3], max[3] /*, loc[3], size[3] */;
-  int tot;
-  bool do_it = false;
-
-  if (ob->runtime.bb == nullptr) {
-    ob->runtime.bb = MEM_cnew<BoundBox>(__func__);
-  }
-  bb = ob->runtime.bb;
-
-  /* Weird one, this. */
-  // INIT_MINMAX(min, max);
-  (min)[0] = (min)[1] = (min)[2] = 1.0e30f;
-  (max)[0] = (max)[1] = (max)[2] = -1.0e30f;
-
-  dl = static_cast<DispList *>(ob->runtime.curve_cache->disp.first);
-  while (dl) {
-    tot = dl->nr;
-    if (tot) {
-      do_it = true;
-    }
-    data = dl->verts;
-    while (tot--) {
-      /* Also weird... but longer. From utildefines. */
-      minmax_v3v3_v3(min, max, data);
-      data += 3;
-    }
-    dl = dl->next;
-  }
-
-  if (!do_it) {
-    min[0] = min[1] = min[2] = -1.0f;
-    max[0] = max[1] = max[2] = 1.0f;
-  }
-
-  BKE_boundbox_init_from_minmax(bb, min, max);
-
-  bb->flag &= ~BOUNDBOX_DIRTY;
-}
 
 BoundBox *BKE_mball_boundbox_get(Object *ob)
 {
   BLI_assert(ob->type == OB_MBALL);
-
   if (ob->runtime.bb != nullptr && (ob->runtime.bb->flag & BOUNDBOX_DIRTY) == 0) {
     return ob->runtime.bb;
   }
-
-  /* This should always only be called with evaluated objects,
-   * but currently RNA is a problem here... */
-  if (ob->runtime.curve_cache != nullptr) {
-    BKE_mball_texspace_calc(ob);
+  if (ob->runtime.bb == nullptr) {
+    ob->runtime.bb = MEM_cnew<BoundBox>(__func__);
   }
+
+  /* Expect that this function is only called for evaluated objects. */
+  const Mesh *mesh_eval = BKE_object_get_evaluated_mesh(ob);
+  float min[3];
+  float max[3];
+  if (mesh_eval) {
+    INIT_MINMAX(min, max);
+    if (!BKE_mesh_minmax(mesh_eval, min, max)) {
+      copy_v3_fl(min, -1.0f);
+      copy_v3_fl(max, 1.0f);
+    }
+  }
+  else {
+    copy_v3_fl(min, 0.0f);
+    copy_v3_fl(max, 0.0f);
+  }
+
+  BKE_boundbox_init_from_minmax(ob->runtime.bb, min, max);
+  ob->runtime.bb->flag &= ~BOUNDBOX_DIRTY;
 
   return ob->runtime.bb;
-}
-
-float *BKE_mball_make_orco(Object *ob, ListBase *dispbase)
-{
-  BoundBox *bb;
-  DispList *dl;
-  float *data, *orco, *orcodata;
-  float loc[3], size[3];
-  int a;
-
-  /* restore size and loc */
-  bb = ob->runtime.bb;
-  loc[0] = (bb->vec[0][0] + bb->vec[4][0]) / 2.0f;
-  size[0] = bb->vec[4][0] - loc[0];
-  loc[1] = (bb->vec[0][1] + bb->vec[2][1]) / 2.0f;
-  size[1] = bb->vec[2][1] - loc[1];
-  loc[2] = (bb->vec[0][2] + bb->vec[1][2]) / 2.0f;
-  size[2] = bb->vec[1][2] - loc[2];
-
-  dl = static_cast<DispList *>(dispbase->first);
-  orcodata = static_cast<float *>(MEM_mallocN(sizeof(float[3]) * dl->nr, __func__));
-
-  data = dl->verts;
-  orco = orcodata;
-  a = dl->nr;
-  while (a--) {
-    orco[0] = (data[0] - loc[0]) / size[0];
-    orco[1] = (data[1] - loc[1]) / size[1];
-    orco[2] = (data[2] - loc[2]) / size[2];
-
-    data += 3;
-    orco += 3;
-  }
-
-  return orcodata;
 }
 
 bool BKE_mball_is_basis(const Object *ob)
@@ -364,7 +297,7 @@ bool BKE_mball_is_basis(const Object *ob)
 
   /* Just a quick test. */
   const int len = strlen(ob->id.name);
-  return (!isdigit(ob->id.name[len - 1]));
+  return !isdigit(ob->id.name[len - 1]);
 }
 
 bool BKE_mball_is_same_group(const Object *ob1, const Object *ob2)
@@ -514,7 +447,8 @@ Object *BKE_mball_basis_find(Scene *scene, Object *object)
   BLI_split_name_num(basisname, &basisnr, object->id.name + 2, '.');
 
   LISTBASE_FOREACH (ViewLayer *, view_layer, &scene->view_layers) {
-    LISTBASE_FOREACH (Base *, base, &view_layer->object_bases) {
+    BKE_view_layer_synced_ensure(scene, view_layer);
+    LISTBASE_FOREACH (Base *, base, BKE_view_layer_object_bases_get(view_layer)) {
       Object *ob = base->object;
       if ((ob->type == OB_MBALL) && !(base->flag & BASE_FROM_DUPLI)) {
         if (ob != bob) {
@@ -592,7 +526,7 @@ bool BKE_mball_center_median(const MetaBall *mb, float r_cent[3])
   }
 
   if (total) {
-    mul_v3_fl(r_cent, 1.0f / (float)total);
+    mul_v3_fl(r_cent, 1.0f / float(total));
   }
 
   return (total != 0);
@@ -735,20 +669,44 @@ bool BKE_mball_select_swap_multi_ex(Base **bases, int bases_len)
 
 /* **** Depsgraph evaluation **** */
 
-/* Draw Engine */
-
-void (*BKE_mball_batch_cache_dirty_tag_cb)(MetaBall *mb, int mode) = nullptr;
-void (*BKE_mball_batch_cache_free_cb)(MetaBall *mb) = nullptr;
-
-void BKE_mball_batch_cache_dirty_tag(MetaBall *mb, int mode)
+void BKE_mball_data_update(Depsgraph *depsgraph, Scene *scene, Object *ob)
 {
-  if (mb->batch_cache) {
-    BKE_mball_batch_cache_dirty_tag_cb(mb, mode);
+  BLI_assert(ob->type == OB_MBALL);
+
+  BKE_object_free_derived_caches(ob);
+
+  const Object *basis_object = BKE_mball_basis_find(scene, ob);
+  if (ob != basis_object) {
+    return;
   }
-}
-void BKE_mball_batch_cache_free(MetaBall *mb)
-{
-  if (mb->batch_cache) {
-    BKE_mball_batch_cache_free_cb(mb);
+
+  Mesh *mesh = BKE_mball_polygonize(depsgraph, scene, ob);
+  if (mesh == nullptr) {
+    return;
   }
-}
+
+  const MetaBall *mball = static_cast<MetaBall *>(ob->data);
+  mesh->mat = static_cast<Material **>(MEM_dupallocN(mball->mat));
+  mesh->totcol = mball->totcol;
+
+  if (ob->parent && ob->parent->type == OB_LATTICE && ob->partype == PARSKEL) {
+    int verts_num;
+    float(*positions)[3] = BKE_mesh_vert_coords_alloc(mesh, &verts_num);
+    BKE_lattice_deform_coords(ob->parent, ob, positions, verts_num, 0, nullptr, 1.0f);
+    BKE_mesh_vert_coords_apply(mesh, positions);
+    MEM_freeN(positions);
+  }
+
+  ob->runtime.geometry_set_eval = new GeometrySet(GeometrySet::create_with_mesh(mesh));
+
+  if (ob->runtime.bb == nullptr) {
+    ob->runtime.bb = MEM_cnew<BoundBox>(__func__);
+  }
+  blender::float3 min(std::numeric_limits<float>::max());
+  blender::float3 max(-std::numeric_limits<float>::max());
+  if (!ob->runtime.geometry_set_eval->compute_boundbox_without_instances(&min, &max)) {
+    min = blender::float3(0);
+    max = blender::float3(0);
+  }
+  BKE_boundbox_init_from_minmax(ob->runtime.bb, min, max);
+};

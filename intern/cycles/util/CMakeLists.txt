@@ -3,7 +3,6 @@
 
 set(INC
   ..
-  ../../glew-mx
 )
 
 set(INC_SYS
@@ -50,6 +49,7 @@ set(SRC_HEADERS
   foreach.h
   function.h
   guarded_allocator.h
+  guiding.h
   half.h
   hash.h
   ies.h
@@ -148,7 +148,5 @@ endif()
 
 include_directories(${INC})
 include_directories(SYSTEM ${INC_SYS})
-
-add_definitions(${GL_DEFINITIONS})
 
 cycles_add_library(cycles_util "${LIB}" ${SRC} ${SRC_HEADERS})

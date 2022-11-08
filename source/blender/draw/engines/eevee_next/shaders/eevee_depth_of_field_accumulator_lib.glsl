@@ -239,7 +239,7 @@ void dof_gather_accumulate_sample_ring(DofGatherData ring_data,
   }
 }
 
-/* FIXME(fclem) Seems to be wrong since it needs ringcount+1 as input for
+/* FIXME(fclem) Seems to be wrong since it needs `ringcount + 1` as input for
  * slightfocus gather. */
 /* This should be replaced by web_sample_count_get() but doing so is breaking other things. */
 int dof_gather_total_sample_count(const int ring_count, const int ring_density)
@@ -665,7 +665,7 @@ void dof_slight_focus_gather(sampler2D depth_tx,
   dof_gather_accumulate_resolve(total_sample_count, bg_accum, bg_col, bg_weight, unused_occlusion);
   dof_gather_accumulate_resolve(total_sample_count, fg_accum, fg_col, fg_weight, unused_occlusion);
 
-  /* Fix weighting issues on perfectly focus to slight focus transitionning areas. */
+  /* Fix weighting issues on perfectly focus to slight focus transitioning areas. */
   if (abs(center_data.coc) < 0.5) {
     bg_col = center_data.color;
     bg_weight = 1.0;
